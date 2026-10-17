@@ -1,0 +1,561 @@
+<!doctype html>
+<html lang="en">
+
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>PR Reviewer Dashboard</title>
+  <style>
+    :root {
+      --bg: #f6f7f9;
+      --card: #fff;
+      --ink: #1c2230;
+      --mute: #6b7384;
+      --line: #e3e6ec;
+      --accent: #4f46e5;
+      --critical: #b91c1c;
+      --high: #c2410c;
+      --medium: #a16207;
+      --low: #1d6fb8;
+      --info: #6b7384;
+      --hold: #b91c1c;
+      --comment: #1d6fb8;
+      --approve: #15803d;
+      --request_changes: #c2410c;
+      --code: #f1f3f7
+    }
+
+    @media (prefers-color-scheme:dark) {
+      :root {
+        --bg: #12141a;
+        --card: #1b1e27;
+        --ink: #e8eaf0;
+        --mute: #9099ac;
+        --line: #2b3040;
+        --accent: #8b85ff;
+        --critical: #f87171;
+        --high: #fb923c;
+        --medium: #facc15;
+        --low: #60a5fa;
+        --info: #9099ac;
+        --hold: #f87171;
+        --comment: #60a5fa;
+        --approve: #4ade80;
+        --request_changes: #fb923c;
+        --code: #14161d
+      }
+    }
+
+    * {
+      box-sizing: border-box
+    }
+
+    body {
+      margin: 0;
+      background: var(--bg);
+      color: var(--ink);
+      font: 14px/1.5 system-ui, -apple-system, Segoe UI, Roboto, sans-serif
+    }
+
+    header {
+      display: flex;
+      gap: 12px;
+      align-items: center;
+      padding: 12px 20px;
+      background: var(--card);
+      border-bottom: 1px solid var(--line);
+      position: sticky;
+      top: 0;
+      z-index: 5;
+      flex-wrap: wrap
+    }
+
+    h1 {
+      font-size: 16px;
+      margin: 0;
+      flex: 1
+    }
+
+    nav button,
+    .btn {
+      background: none;
+      border: 1px solid var(--line);
+      color: var(--ink);
+      padding: 5px 12px;
+      border-radius: 6px;
+      cursor: pointer;
+      font: inherit
+    }
+
+    nav button.on {
+      background: var(--accent);
+      border-color: var(--accent);
+      color: #fff
+    }
+
+    main {
+      max-width: 1200px;
+      margin: 0 auto;
+      padding: 16px 20px
+    }
+
+    .cards {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+      gap: 10px;
+      margin-bottom: 16px
+    }
+
+    .card,
+    .panel {
+      background: var(--card);
+      border: 1px solid var(--line);
+      border-radius: 8px
+    }
+
+    .card {
+      padding: 12px 14px
+    }
+
+    .card b {
+      display: block;
+      font-size: 22px
+    }
+
+    .card span {
+      color: var(--mute);
+      font-size: 12px
+    }
+
+    .panel {
+      padding: 14px
+    }
+
+    .split {
+      display: grid;
+      grid-template-columns: minmax(300px, 380px) 1fr;
+      gap: 14px;
+      align-items: start
+    }
+
+    @media(max-width:800px) {
+      .split {
+        grid-template-columns: 1fr
+      }
+    }
+
+    .bar {
+      display: flex;
+      gap: 8px;
+      margin-bottom: 10px;
+      flex-wrap: wrap
+    }
+
+    select,
+    input {
+      background: var(--card);
+      color: var(--ink);
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      padding: 5px 8px;
+      font: inherit
+    }
+
+    input {
+      flex: 1;
+      min-width: 140px
+    }
+
+    .row {
+      padding: 10px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      margin-bottom: 8px;
+      cursor: pointer;
+      background: var(--card)
+    }
+
+    .row:hover,
+    .row.sel {
+      border-color: var(--accent)
+    }
+
+    .row .t {
+      font-weight: 600
+    }
+
+    .mute {
+      color: var(--mute);
+      font-size: 12px
+    }
+
+    .pill {
+      display: inline-block;
+      padding: 1px 8px;
+      border-radius: 99px;
+      font-size: 11px;
+      font-weight: 600;
+      border: 1px solid currentColor;
+      margin-right: 4px;
+      text-transform: uppercase
+    }
+
+    .sev-critical {
+      color: var(--critical)
+    }
+
+    .sev-high {
+      color: var(--high)
+    }
+
+    .sev-medium {
+      color: var(--medium)
+    }
+
+    .sev-low {
+      color: var(--low)
+    }
+
+    .sev-info {
+      color: var(--info)
+    }
+
+    .v-hold {
+      color: var(--hold)
+    }
+
+    .v-comment {
+      color: var(--comment)
+    }
+
+    .v-approve {
+      color: var(--approve)
+    }
+
+    .v-request_changes {
+      color: var(--request_changes)
+    }
+
+    .finding {
+      border-left: 4px solid currentColor;
+      padding: 8px 12px;
+      margin: 10px 0;
+      background: var(--code);
+      border-radius: 0 6px 6px 0
+    }
+
+    .finding .body {
+      color: var(--ink)
+    }
+
+    code,
+    pre {
+      font-family: ui-monospace, Menlo, Consolas, monospace;
+      font-size: 12px
+    }
+
+    pre {
+      background: var(--code);
+      padding: 10px;
+      border-radius: 6px;
+      overflow: auto;
+      max-height: 300px;
+      white-space: pre
+    }
+
+    .chips {
+      margin: 8px 0
+    }
+
+    .chip {
+      cursor: pointer;
+      opacity: .5;
+      color: var(--ink)
+    }
+
+    .chip.on {
+      opacity: 1;
+      color: var(--accent)
+    }
+
+    .warn {
+      background: var(--code);
+      border: 1px solid var(--hold);
+      color: var(--hold);
+      padding: 8px 12px;
+      border-radius: 6px;
+      margin: 8px 0
+    }
+
+    table {
+      width: 100%;
+      border-collapse: collapse
+    }
+
+    td,
+    th {
+      padding: 5px 8px;
+      border-bottom: 1px solid var(--line);
+      text-align: left
+    }
+
+    a.fn {
+      color: var(--accent);
+      cursor: pointer;
+      text-decoration: none
+    }
+
+    a.fn:hover {
+      text-decoration: underline
+    }
+
+    .cols {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+      gap: 14px
+    }
+
+    .empty {
+      color: var(--mute);
+      padding: 24px;
+      text-align: center
+    }
+
+    .lang {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      margin: 3px 0
+    }
+
+    .lang i {
+      display: block;
+      height: 8px;
+      background: var(--accent);
+      border-radius: 4px
+    }
+
+    h3 {
+      margin: 14px 0 6px;
+      font-size: 13px;
+      text-transform: uppercase;
+      letter-spacing: .04em;
+      color: var(--mute)
+    }
+  </style>
+</head>
+
+<body>
+  <header>
+    <h1>🔍 PR Reviewer <span class="mute" id="graphState"></span></h1>
+    <nav><button id="tabR" class="on">Reviews</button> <button id="tabG">Code graph</button></nav>
+    <button class="btn" id="refresh">↻ Refresh</button>
+  </header>
+  <main>
+    <section id="reviews">
+      <div class="cards" id="stats"></div>
+      <div class="split">
+        <div>
+          <div class="bar">
+            <select id="repoSel">
+              <option value="">All repos</option>
+            </select>
+            <select id="verdictSel">
+              <option value="">Any verdict</option>
+              <option>hold</option>
+              <option>comment</option>
+              <option>approve</option>
+              <option>request_changes</option>
+            </select>
+          </div>
+          <div id="list"></div>
+        </div>
+        <div class="panel" id="detail">
+          <div class="empty">Select a review</div>
+        </div>
+      </div>
+    </section>
+
+    <section id="graph" hidden>
+      <div class="bar"><select id="gRepo"></select><input id="gQ" placeholder="Search functions by name…"></div>
+      <div id="gBody"></div>
+    </section>
+  </main>
+
+  <script>
+    const $ = id => document.getElementById(id);
+    const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+    const api = async (path, params = {}) => {
+      const q = new URLSearchParams(Object.entries(params).filter(([, v]) => v)).toString();
+      const r = await fetch(`/api/${path}${q ? "?" + q : ""}`);
+      if (!r.ok) { const e = await r.json().catch(() => ({})); throw new Error(e.detail || r.statusText); }
+      return r.json();
+    };
+    const ago = iso => {
+      const s = (Date.now() - new Date(iso)) / 1000;
+      return s < 60 ? "just now" : s < 3600 ? Math.floor(s / 60) + "m ago" : s < 86400 ? Math.floor(s / 3600) + "h ago" : Math.floor(s / 86400) + "d ago";
+    };
+    const pill = (cls, text) => `<span class="pill ${cls}">${esc(text)}</span>`;
+
+    let selected = null, agentFilter = null;
+
+    /* ---------------- Reviews ---------------- */
+    async function loadStats() {
+      const { stats } = await api("stats");
+      const sev = stats.by_severity;
+      const cards = [
+        ["Reviews", stats.total_reviews],
+        ["Held for human", stats.by_verdict.hold || 0],
+        ["Critical / High", (sev.critical || 0) + (sev.high || 0)],
+        ["Total findings", Object.values(sev).reduce((a, b) => a + b, 0)],
+        ...Object.entries(stats.by_agent).map(([a, n]) => [a + " agent", n]),
+      ];
+      $("stats").innerHTML = cards.map(([l, n]) => `<div class="card"><b>${n}</b><span>${esc(l)}</span></div>`).join("");
+      const cur = $("repoSel").value;
+      $("repoSel").innerHTML = `<option value="">All repos</option>` + stats.repos.map(r => `<option ${r === cur ? "selected" : ""}>${esc(r)}</option>`).join("");
+    }
+
+    async function loadList() {
+      const { reviews } = await api("reviews", { repo: $("repoSel").value });
+      const v = $("verdictSel").value;
+      const rows = reviews.filter(r => !v || r.verdict === v);
+      $("list").innerHTML = rows.length ? rows.map(r => `
+    <div class="row ${r.id === selected ? "sel" : ""}" data-id="${r.id}">
+      <div class="t">#${r.pr_number} ${esc(r.pr_title || "(untitled)")}</div>
+      <div class="mute">${esc(r.repo)} · ${ago(r.created_at)}</div>
+      <div style="margin-top:4px">${pill("v-" + r.verdict, r.verdict.replace("_", " "))}
+        <span class="mute">${r.finding_count} finding${r.finding_count === 1 ? "" : "s"} · ${r.agents.map(esc).join(", ") || "clean"}</span></div>
+    </div>`).join("") : `<div class="empty">No reviews yet. Open a PR on a repo with the webhook installed.</div>`;
+      $("list").querySelectorAll(".row").forEach(el => el.onclick = () => openReview(+el.dataset.id));
+    }
+
+    async function openReview(id) {
+      selected = id; agentFilter = null;
+      document.querySelectorAll("#list .row").forEach(el => el.classList.toggle("sel", +el.dataset.id === id));
+      const { review: r } = await api("reviews/" + id);
+      renderReview(r);
+    }
+
+    function renderReview(r) {
+      const agents = [...new Set(r.findings.map(f => f.agent_type))];
+      const shown = r.findings.filter(f => !agentFilter || f.agent_type === agentFilter);
+      const order = ["critical", "high", "medium", "low", "info"];
+      shown.sort((a, b) => order.indexOf(a.severity) - order.indexOf(b.severity));
+      $("detail").innerHTML = `
+    <div class="t" style="font-size:16px">#${r.pr_number} ${esc(r.pr_title || "")}</div>
+    <div class="mute">${esc(r.repo)} · ${esc((r.head_sha || "").slice(0, 7))} · ${new Date(r.created_at).toLocaleString()}</div>
+    <div style="margin:8px 0">${pill("v-" + r.verdict, r.verdict.replace("_", " "))}
+      <span class="mute">min confidence ${(r.overall_confidence ?? 0).toFixed(2)}</span></div>
+    ${r.needs_human_review ? `<div class="warn">⚠️ Held for human approval: it has a critical finding or low confidence.</div>` : ""}
+    <div class="chips">${agents.map(a => `<span class="pill chip ${agentFilter === a ? "on" : ""}" data-a="${a}">${esc(a)}</span>`).join("")}</div>
+    ${shown.map(f => `
+      <div class="finding sev-${f.severity}">
+        <div>${pill("sev-" + f.severity, f.severity)}<b style="color:var(--ink)">${esc(f.category)}</b>
+          <span class="mute">· ${esc(f.agent_type)} · conf ${(f.confidence ?? 0).toFixed(2)}</span></div>
+        <div class="body">
+          <div>${esc(f.summary)}</div>
+          ${f.file ? `<div class="mute"><code>${esc(f.file)}${f.line ? ":" + f.line : ""}</code></div>` : ""}
+          <div class="mute" style="margin-top:4px"><i>${esc(f.rationale)}</i></div>
+          ${f.suggestion ? `<div style="margin-top:4px"><b>Fix:</b> ${esc(f.suggestion)}</div>` : ""}
+        </div>
+      </div>`).join("") || `<div class="empty">No findings. This PR looked clean.</div>`}
+    ${ctxPanel(r.graph_context)}
+    <details><summary class="mute">Comment posted to GitHub</summary><pre>${esc(r.summary)}</pre></details>`;
+      $("detail").querySelectorAll(".chip").forEach(c => c.onclick = () => {
+        agentFilter = agentFilter === c.dataset.a ? null : c.dataset.a; renderReview(r);
+      });
+    }
+
+    function ctxPanel(g) {
+      if (!g) return `<details><summary class="mute">Graph context sent to agents</summary><div class="mute" style="padding:8px">Not recorded (review made before this feature).</div></details>`;
+      if (g.status !== "ok") return `<div class="warn" style="color:var(--medium);border-color:var(--medium)">Graph context: <b>${esc(g.status)}</b>, so the agents saw the diff only. ${esc(g.detail || "")}</div>`;
+      const rows = (g.changed || []).map(c => `<tr><td>${esc(c.name)}<div class="mute">${esc(c.loc)}</div></td><td>${pill("sev-" + (c.risk === "high" ? "high" : c.risk === "medium" ? "medium" : "low"), c.risk)}${c.signature_touched ? pill("sev-critical", "signature changed") : ""}</td><td>${c.fan_in} callers · reach ${c.reach} · ${c.tests} tests</td></tr>`).join("");
+      const agents = Object.keys(g.agents || {});
+      return `<details open><summary class="mute">Graph context sent to agents</summary>
+    ${rows ? `<table>${rows}</table>` : `<div class="mute">No existing functions changed.</div>`}
+    ${g.new_files?.length ? `<div class="mute">New files (not in graph): ${g.new_files.map(esc).join(", ")}</div>` : ""}
+    ${agents.map(a => `<details><summary><b>${esc(a)}</b> <span class="mute">${g.agents[a].length} chars</span></summary><pre>${esc(g.agents[a])}</pre></details>`).join("")}
+  </details>`;
+    }
+
+    /* ---------------- Code graph ---------------- */
+    let gRepo = "";
+    async function initGraph() {
+      try {
+        const { repos } = await api("graph/repos");
+        $("gRepo").innerHTML = repos.map(r => `<option>${esc(r)}</option>`).join("");
+        if (!repos.length) { $("gBody").innerHTML = `<div class="empty">No graphs yet. One is built when the first PR arrives for a repo.</div>`; return; }
+        gRepo = $("gRepo").value; loadOverview();
+      } catch (e) { $("gBody").innerHTML = `<div class="empty">${esc(e.message)}</div>`; }
+    }
+
+    async function loadOverview() {
+      gRepo = $("gRepo").value;
+      try {
+        const o = await api("graph/overview", { repo: gRepo });
+        const max = Math.max(...o.languages.map(l => l.n), 1);
+        const cards = [["Files", o.files], ["Test files", o.test_files], ["Functions", o.functions], ["Call edges", o.calls], ["Import edges", o.imports],
+        ["Indexed commit", o.sha ? o.sha.slice(0, 7) : "manual build"]];
+        $("gBody").innerHTML = `
+      <div class="cards">${cards.map(([l, n]) => `<div class="card"><b>${esc(n)}</b><span>${l}</span></div>`).join("")}</div>
+      <div class="cols">
+        <div class="panel"><h3 style="margin-top:0">Languages</h3>${o.languages.map(l =>
+          `<div class="lang"><span style="width:90px">${esc(l.language)}</span><i style="width:${l.n / max * 100}%"></i><span class="mute">${l.n}</span></div>`).join("")}</div>
+        <div class="panel"><h3 style="margin-top:0">Hotspots (most callers = biggest blast radius)</h3>
+          <table>${o.hotspots.map(h => `<tr><td><a class="fn" data-id="${esc(h.id)}">${esc(h.name)}</a><div class="mute">${esc(h.file)}</div></td><td>${h.callers}</td></tr>`).join("")}</table></div>
+      </div><div id="fnView"></div>`;
+        bindFn($("gBody"));
+      } catch (e) { $("gBody").innerHTML = `<div class="empty">${esc(e.message)}</div>`; }
+    }
+
+    const bindFn = root => root.querySelectorAll("a.fn").forEach(a => a.onclick = () => openFn(a.dataset.id));
+    const fnList = (items, empty) => items.length ? `<table>${items.map(f =>
+      `<tr><td><a class="fn" data-id="${esc(f.id)}">${esc(f.name)}</a><div class="mute">${esc(f.file)}:${f.start_line}${f.dist ? " · " + f.dist + " hop" + (f.dist > 1 ? "s" : "") : ""}</div></td></tr>`).join("")}</table>` : `<div class="mute">${empty}</div>`;
+
+    async function openFn(id) {
+      try {
+        const v = await api("graph/function", { repo: gRepo, id });
+        const f = v.function;
+        let host = $("fnView");
+        if (!host) { await loadOverview(); host = $("fnView"); }
+        host.innerHTML = `
+      <h3>${esc(f.name)} <span class="mute" style="text-transform:none">${esc(f.file)}:${f.start_line}-${f.end_line}</span></h3>
+      <div class="cols">
+        <div class="panel"><h3 style="margin-top:0">Callers (${v.callers.length})</h3>${fnList(v.callers, "No production callers")}</div>
+        <div class="panel"><h3 style="margin-top:0">Calls (${v.callees.length})</h3>${fnList(v.callees, "Calls nothing in this repo")}</div>
+        <div class="panel"><h3 style="margin-top:0">Tests reaching it (${v.tests.length})</h3>${fnList(v.tests, "⚠️ No test reaches this function")}</div>
+      </div><pre style="margin-top:14px">${esc(f.code)}</pre>`;
+        bindFn(host); host.scrollIntoView({ behavior: "smooth" });
+      } catch (e) { alert(e.message); }
+    }
+
+    let t;
+    $("gQ").oninput = () => {
+      clearTimeout(t); t = setTimeout(async () => {
+        const q = $("gQ").value.trim();
+        if (!q) return loadOverview();
+        const { results } = await api("graph/search", { repo: gRepo, q });
+        $("gBody").innerHTML = `<div class="panel">${results.length ? `<table>${results.map(f =>
+          `<tr><td><a class="fn" data-id="${esc(f.id)}">${esc(f.name)}</a></td><td class="mute">${esc(f.file)}:${f.start_line}</td></tr>`).join("")}</table>` : `<div class="empty">No match</div>`}</div><div id="fnView"></div>`;
+        bindFn($("gBody"));
+      }, 250);
+    };
+    $("gRepo").onchange = loadOverview;
+
+    /* ---------------- wiring ---------------- */
+    function tab(name) {
+      $("reviews").hidden = name !== "R"; $("graph").hidden = name !== "G";
+      $("tabR").classList.toggle("on", name === "R"); $("tabG").classList.toggle("on", name === "G");
+      if (name === "G" && !gRepo) initGraph();
+    }
+    $("tabR").onclick = () => tab("R"); $("tabG").onclick = () => tab("G");
+    $("repoSel").onchange = $("verdictSel").onchange = loadList;
+    const refresh = async () => { await loadStats(); await loadList(); if (selected) openReview(selected); };
+    $("refresh").onclick = refresh;
+    fetch("/health").then(r => r.json()).then(h => $("graphState").textContent = h.graph_enabled ? "· graph on" : "· graph off").catch(() => { });
+    refresh().catch(e => $("list").innerHTML = `<div class="empty">${esc(e.message)}</div>`);
+    setInterval(() => { if (!$("reviews").hidden) { loadStats(); loadList(); } }, 15000);
+  </script>
+</body>
+
+</html>
