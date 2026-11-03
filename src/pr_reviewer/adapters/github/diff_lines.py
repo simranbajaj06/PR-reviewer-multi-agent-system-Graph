@@ -36,3 +36,4 @@ def commentable_lines(diff: str) -> dict[str, set[int]]:
         cur.add(new_ln)                             # "+" or context line
         new_ln += 1
     return out
+

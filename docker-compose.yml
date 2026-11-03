@@ -1,0 +1,98 @@
+name: pr-reviewer
+
+x-app: &app
+  build: .
+  image: pr-reviewer:latest
+  restart: unless-stopped
+  env_file: .env
+  environment:
+    DATABASE_URL: postgresql://pr_reviewer:${POSTGRES_PASSWORD}@postgres:5432/pr_reviewer
+    REDIS_URL: redis://:${REDIS_PASSWORD}@redis:6379/0
+    FALKORDB_HOST: falkordb
+    FALKORDB_PORT: "6379"
+    FALKORDB_PASSWORD: ${FALKORDB_PASSWORD}
+    QUEUE_BACKEND: redis
+    RUN_EMBEDDED_WORKER: "false"
+  depends_on:
+    postgres: { condition: service_healthy }
+    redis: { condition: service_healthy }
+    falkordb: { condition: service_healthy }
+
+services:
+  api:
+    <<: *app
+    healthcheck:
+      test: [ "CMD", "python", "-c", "import urllib.request as u; u.urlopen('http://localhost:8000/health', timeout=4)" ]
+      interval: 20s
+      timeout: 6s
+      retries: 3
+      start_period: 40s
+
+  # Run exactly ONE replica for now (see DEPLOY.md, "Scaling the worker").
+  worker:
+    <<: *app
+    command: [ "python", "-m", "src.pr_reviewer.worker_main" ]
+    stop_grace_period: 120s # SIGTERM = finish the current job, then exit
+
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: pr_reviewer
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: pr_reviewer
+    volumes: [ pgdata:/var/lib/postgresql/data ]
+    healthcheck:
+      test: [ "CMD-SHELL", "pg_isready -U pr_reviewer -d pr_reviewer" ]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  # Job queue + dedupe keys. AOF on, so queued jobs survive a restart.
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    command: [ "redis-server", "--appendonly", "yes", "--requirepass", "${REDIS_PASSWORD}" ]
+    environment: { REDIS_PASSWORD: "${REDIS_PASSWORD}" }
+    volumes: [ redisdata:/data ]
+    healthcheck:
+      test: [ "CMD-SHELL", "redis-cli --no-auth-warning -a \"$$REDIS_PASSWORD\" ping | grep -q PONG" ]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  # Code knowledge graph. Separate from the queue Redis on purpose.
+  falkordb:
+    image: falkordb/falkordb:latest # pin to a specific tag once it works for you
+    restart: unless-stopped
+    environment:
+      REDIS_ARGS: "--requirepass ${FALKORDB_PASSWORD} --appendonly yes"
+      FALKORDB_PASSWORD: ${FALKORDB_PASSWORD}
+    volumes: [ falkordata:/var/lib/falkordb/data ]
+    healthcheck:
+      test: [ "CMD-SHELL", "redis-cli --no-auth-warning -a \"$$FALKORDB_PASSWORD\" ping | grep -q PONG" ]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  # HTTPS (automatic Let's Encrypt) + password for the dashboard/API.
+  caddy:
+    image: caddy:2
+    restart: unless-stopped
+    ports: [ "80:80", "443:443" ]
+    environment:
+      DOMAIN: ${DOMAIN}
+      DASH_USER: ${DASH_USER}
+      DASH_PASS_HASH: ${DASH_PASS_HASH}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on: [ api ]
+
+volumes:
+  pgdata:
+  redisdata:
+  falkordata:
+  caddy_data:
+  caddy_config:

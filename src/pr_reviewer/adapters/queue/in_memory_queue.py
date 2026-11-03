@@ -5,7 +5,7 @@ anything in domain/ or api/, since they only ever depend on ReviewQueue.
 import queue
 
 from src.pr_reviewer.domain.interfaces import ReviewQueue
-from src.pr_reviewer.domain.models import IndexJob, PullRequestEvent, QueueJob
+from src.pr_reviewer.domain.models import CommentQuery, IndexJob, PullRequestEvent, QueueJob
 
 
 class InMemoryReviewQueue(ReviewQueue):
@@ -18,6 +18,9 @@ class InMemoryReviewQueue(ReviewQueue):
             print(f"[queue] enqueued PR #{job.pr_number} ({job.repo_full_name}): {job.pr_title!r}")
         elif isinstance(job, IndexJob):
             print(f"[queue] enqueued index job ({job.repo_full_name} @ {job.sha[:7]})")
+        elif isinstance(job, CommentQuery):
+            e = job.event
+            print(f"[queue] enqueued comment query on PR #{e.pr_number} ({e.repo_full_name}) from @{e.author}")
 
     def dequeue(self) -> QueueJob | None:
         """Used by the worker to pull the next job off the queue."""

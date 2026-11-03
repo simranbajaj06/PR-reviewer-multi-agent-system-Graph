@@ -41,6 +41,44 @@ class GitHubClient(VCSClient):
         resp = self._session.post(url, json={"body": body}, timeout=15)
         resp.raise_for_status()
 
+    def fetch_review_thread(self, repo_full_name: str, pr_number: int, root_comment_id: int) -> list[dict]:
+        """Every comment of one inline thread (root + replies), oldest first."""
+        url = f"https://api.github.com/repos/{repo_full_name}/pulls/{pr_number}/comments"
+        thread: list[dict] = []
+        for page in range(1, 11):  # up to 1000 review comments per PR
+            resp = self._session.get(url, params={"per_page": 100, "page": page}, timeout=15)
+            resp.raise_for_status()
+            items = resp.json()
+            for c in items:
+                if c["id"] == root_comment_id or c.get("in_reply_to_id") == root_comment_id:
+                    user = c.get("user") or {}
+                    thread.append({
+                        "id": c["id"],
+                        "author": user.get("login", ""),
+                        "author_type": user.get("type", ""),
+                        "body": c.get("body", ""),
+                        "path": c.get("path", ""),
+                        "line": c.get("line") or c.get("original_line"),
+                        "diff_hunk": c.get("diff_hunk", ""),
+                        "created_at": c.get("created_at", ""),
+                    })
+            if len(items) < 100:
+                break
+        thread.sort(key=lambda c: (c["created_at"], c["id"]))
+        return thread
+
+    def reply_to_review_comment(
+        self, repo_full_name: str, pr_number: int, root_comment_id: int, body: str
+    ) -> None:
+        """Replies inside an inline review thread (GitHub only allows replying to the root)."""
+        url = (
+            f"https://api.github.com/repos/{repo_full_name}"
+            f"/pulls/{pr_number}/comments/{root_comment_id}/replies"
+        )
+        resp = self._session.post(url, json={"body": body}, timeout=15)
+        if not resp.ok:
+            raise requests.HTTPError(f"{resp.status_code} {resp.reason}: {resp.text[:500]}", response=resp)
+
     def post_review(
         self,
         event: PullRequestEvent,

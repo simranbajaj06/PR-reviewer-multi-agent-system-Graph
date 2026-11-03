@@ -36,8 +36,36 @@ class IndexJob:
     branch: str = ""           # empty = default branch (legacy compatibility)
 
 
+@dataclass(frozen=True)
+class ReviewCommentEvent:
+    """The subset of a `pull_request_review_comment` payload we need."""
+    action: str
+    repo_full_name: str
+    pr_number: int
+    pr_title: str
+    head_sha: str
+    comment_id: int
+    in_reply_to_id: int | None   # id of the thread's first comment; None = new thread
+    path: str
+    line: int | None
+    diff_hunk: str
+    body: str
+    author: str
+    author_type: str             # "User" | "Bot" | ...
+
+
+@dataclass(frozen=True)
+class CommentQuery:
+    """A user asked the bot a question inside an inline review thread.
+
+    `question` is the comment text with the bot's own @mention removed.
+    """
+    event: ReviewCommentEvent
+    question: str
+
+
 # Anything that can travel through the queue.
-QueueJob = PullRequestEvent | IndexJob
+QueueJob = PullRequestEvent | IndexJob | CommentQuery
 
 
 @dataclass(frozen=True)

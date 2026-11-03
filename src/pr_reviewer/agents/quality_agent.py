@@ -16,4 +16,5 @@ SYSTEM_PROMPT = (
 
 
 def build_node(llm: ChatGroq):
+    
     return make_specialist_node(AgentType.QUALITY, SYSTEM_PROMPT, llm)

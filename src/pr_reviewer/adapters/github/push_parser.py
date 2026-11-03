@@ -55,4 +55,4 @@ def parse_push_event(
         # Empty branch = "this IS the primary/default graph" (backward compat).
         # Non-empty   = isolated branch graph, never clobbers the primary graph.
         branch="" if is_primary else branch,
-    ), None
+    ), None

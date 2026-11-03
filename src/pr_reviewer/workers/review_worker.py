@@ -1,47 +1,28 @@
 """Drains the queue and dispatches by job type:
   PullRequestEvent -> fetch diff -> make sure the code graph exists -> get a review -> post it back to the PR
   IndexJob         -> rebuild the code graph at the pushed commit
+  CommentQuery     -> a user @mentioned the bot in one of its inline threads -> answer in the thread
 """
 import hashlib
 import threading
 import time
 import traceback
-from collections import OrderedDict
 
 from src.pr_reviewer.adapters.github.diff_lines import commentable_lines
 from src.pr_reviewer.adapters.persistence.db import save_review
-from src.pr_reviewer.domain.interfaces import ReviewQueue, Reviewer, VCSClient
-from src.pr_reviewer.domain.models import IndexJob, PullRequestEvent
+from src.pr_reviewer.domain.interfaces import DedupeStore, ReviewQueue, Reviewer, VCSClient
+from src.pr_reviewer.domain.mentions import same_login
+from src.pr_reviewer.domain.models import CommentQuery, IndexJob, PullRequestEvent
 from src.pr_reviewer.graph.updater import GraphUpdater
 
 
-class _RecentReviews:
-    """Remembers the last N (repo, PR, diff) combos that were reviewed AND posted.
-    In-memory: cleared on restart, which is fine for webhook retries."""
-
-    def __init__(self, max_items: int = 256):
-        self._items: OrderedDict[str, None] = OrderedDict()
-        self._max = max_items
-        self._lock = threading.Lock()
-
-    @staticmethod
-    def key(repo: str, pr_number: int, diff: str) -> str:
-        digest = hashlib.sha256(diff.encode("utf-8")).hexdigest()
-        return f"{repo}#{pr_number}:{digest}"
-
-    def seen(self, key: str) -> bool:
-        with self._lock:
-            return key in self._items
-
-    def add(self, key: str) -> None:
-        with self._lock:
-            self._items[key] = None
-            self._items.move_to_end(key)
-            while len(self._items) > self._max:
-                self._items.popitem(last=False)
+_REVIEWED_TTL_S = 7 * 24 * 3600
 
 
-_recent = _RecentReviews()
+def _review_key(repo: str, pr_number: int, diff: str) -> str:
+    """Identifies one (repo, PR, exact diff) combination."""
+    digest = hashlib.sha256(diff.encode("utf-8")).hexdigest()
+    return f"reviewed:{repo}#{pr_number}:{digest}"
 
 
 def _handle_review(
@@ -49,6 +30,7 @@ def _handle_review(
     vcs_client: VCSClient,
     reviewer: Reviewer,
     updater: GraphUpdater | None,
+    dedupe: DedupeStore,
 ) -> None:
     print(f"[worker] reviewing PR #{event.pr_number} on {event.repo_full_name}")
 
@@ -56,10 +38,10 @@ def _handle_review(
         diff = vcs_client.fetch_diff(event)
     except Exception as exc:
         print(f"[worker] failed to fetch diff for PR #{event.pr_number}: {exc}")
-        return
+        raise   # transient (GitHub 5xx, network): let the queue retry this job
 
-    cache_key = _RecentReviews.key(event.repo_full_name, event.pr_number, diff)
-    if _recent.seen(cache_key):
+    cache_key = _review_key(event.repo_full_name, event.pr_number, diff)
+    if dedupe.seen(cache_key):
         print(f"[worker] PR #{event.pr_number}: diff unchanged since last review, skipping")
         return
 
@@ -75,7 +57,7 @@ def _handle_review(
         review = reviewer.review(event, diff)
     except Exception as exc:
         print(f"[worker] review failed for PR #{event.pr_number}: {exc}")
-        return
+        raise   # e.g. LLM rate limit / timeout: retry via the queue
 
     # Persist for the dashboard FIRST, so a review shows up even if posting to GitHub fails.
     try:
@@ -144,17 +126,62 @@ def _handle_review(
         else:
             vcs_client.post_comment(event, review.summary)
 
-        _recent.add(cache_key)
+        dedupe.mark(cache_key, _REVIEWED_TTL_S)
         print(f"[worker] posted review on PR #{event.pr_number}")
     except Exception as exc:
         print(f"[worker] failed to post review on PR #{event.pr_number}: {exc}")
         # Still try to post a plain comment as fallback
         try:
             vcs_client.post_comment(event, review.summary)
-            _recent.add(cache_key)
+            dedupe.mark(cache_key, _REVIEWED_TTL_S)
         except Exception as exc2:
             print(f"[worker] fallback comment also failed: {exc2}")
-            return
+            raise   # nothing was posted: retry the whole job later
+
+
+def _handle_comment_query(
+    job: CommentQuery,
+    vcs_client: VCSClient,
+    reviewer: Reviewer,
+    bot_username: str,
+) -> None:
+    """Answers a question a user asked (with an @mention) under one of OUR inline comments."""
+    ev = job.event
+    root_id = ev.in_reply_to_id
+    tag = f"PR #{ev.pr_number} comment {ev.comment_id}"
+
+    try:
+        thread = vcs_client.fetch_review_thread(ev.repo_full_name, ev.pr_number, root_id)
+    except Exception as exc:
+        print(f"[worker] {tag}: could not fetch thread: {exc}")
+        raise
+
+    # Only answer in threads the reviewer started -- not in human<->human threads.
+    if not thread or not same_login(thread[0]["author"], bot_username):
+        print(f"[worker] {tag}: thread was not started by @{bot_username}, ignoring")
+        return
+
+    # Already answered (webhook redelivery / restart)? Don't answer twice.
+    if any(c["id"] > ev.comment_id and same_login(c["author"], bot_username) for c in thread):
+        print(f"[worker] {tag}: already answered, skipping")
+        return
+
+    try:
+        answer = reviewer.answer_query(ev, thread, job.question)
+    except Exception as exc:
+        print(f"[worker] {tag}: failed to generate answer: {exc}")
+        answer = "Sorry, I couldn't process that question right now. Please try again in a moment."
+
+    if not answer:
+        print(f"[worker] {tag}: empty answer, not replying")
+        return
+
+    try:
+        vcs_client.reply_to_review_comment(ev.repo_full_name, ev.pr_number, root_id, answer)
+        print(f"[worker] {tag}: replied to @{ev.author}")
+    except Exception as exc:
+        print(f"[worker] {tag}: failed to post reply: {exc}")
+        raise
 
 
 def _handle_index(job: IndexJob, updater: GraphUpdater | None) -> None:
@@ -169,6 +196,7 @@ def _handle_index(job: IndexJob, updater: GraphUpdater | None) -> None:
         print(f"[worker] graph up to date for {job.repo_full_name} branch={branch_label} @ {job.sha[:7]}")
     except Exception as exc:
         print(f"[worker] graph sync failed for {job.repo_full_name} branch={branch_label}: {exc}")
+        raise
 
 
 def run_worker(
@@ -177,24 +205,52 @@ def run_worker(
     reviewer: Reviewer,
     updater: GraphUpdater | None = None,
     poll_interval: float = 1.0,
+    bot_username: str = "pr-reviewer",
+    dedupe: DedupeStore | None = None,
+    stop_event: threading.Event | None = None,
 ) -> None:
+    """Main loop. Runs until `stop_event` is set (graceful shutdown) or forever.
+
+    poll_interval is only used when dequeue() returns instantly with nothing
+    (the in-memory queue). The Redis queue long-polls, so it can be 0."""
+    if dedupe is None:
+        from src.pr_reviewer.adapters.dedupe.in_memory_dedupe import InMemoryDedupeStore
+        dedupe = InMemoryDedupeStore()
+    stop = stop_event or threading.Event()
+
     print("[worker] started, waiting for jobs...")
-    while True:
-        job = review_queue.dequeue()
-        if job is None:
-            time.sleep(poll_interval)
+    while not stop.is_set():
+        # The queue backend (Redis) can be briefly unreachable. That must not kill the loop.
+        try:
+            job = review_queue.dequeue()
+        except Exception as exc:
+            print(f"[worker] queue unavailable ({exc}); retrying in 3s")
+            stop.wait(3)
             continue
 
-        # A crash in one job must never kill this thread: if it dies, every later
+        if job is None:
+            if poll_interval:
+                stop.wait(poll_interval)
+            continue
+
+        # A crash in one job must never kill this loop: if it dies, every later
         # webhook is accepted and queued but nothing is ever processed again.
         try:
             if isinstance(job, PullRequestEvent):
                 print(f"[worker] picked up PR #{job.pr_number} ({job.action}) @ {job.head_sha[:7]}")
-                _handle_review(job, vcs_client, reviewer, updater)
+                _handle_review(job, vcs_client, reviewer, updater, dedupe)
             elif isinstance(job, IndexJob):
                 _handle_index(job, updater)
+            elif isinstance(job, CommentQuery):
+                _handle_comment_query(job, vcs_client, reviewer, bot_username)
             else:
                 print(f"[worker] ignoring unknown job type: {type(job).__name__}")
+            review_queue.ack(job)
         except Exception:
-            print("[worker] job crashed (worker keeps running):")
+            print("[worker] job failed (worker keeps running; queue will retry or dead-letter it):")
             traceback.print_exc()
+            try:
+                review_queue.fail(job)
+            except Exception:
+                pass
+    print("[worker] stopped")
